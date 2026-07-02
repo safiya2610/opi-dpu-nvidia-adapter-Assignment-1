@@ -9,6 +9,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -45,7 +46,7 @@ func (r *NvidiaDPFAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// 1. Fetch the OPI DPU instance
 	var opiDPU unstructured.Unstructured
-	opiDPU.SetGroupVersionKind(runtime.GroupVersionKind{
+	opiDPU.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "opi.github.io",
 		Version: "v1alpha1",
 		Kind:    "Dpu",
@@ -96,7 +97,7 @@ func (r *NvidiaDPFAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 func (r *NvidiaDPFAdapterReconciler) translateToDPF(name, namespace string, opiSpec map[string]interface{}) (*unstructured.Unstructured, error) {
 	dpf := &unstructured.Unstructured{}
-	dpf.SetGroupVersionKind(runtime.GroupVersionKind{
+	dpf.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "dpf.nvidia.com",
 		Version: "v1alpha1",
 		Kind:    "DpfDeployment",
@@ -121,7 +122,7 @@ func (r *NvidiaDPFAdapterReconciler) translateToDPF(name, namespace string, opiS
 
 func (r *NvidiaDPFAdapterReconciler) syncStatus(ctx context.Context, opiDPU *unstructured.Unstructured, dpfName, namespace string) error {
 	dpf := &unstructured.Unstructured{}
-	dpf.SetGroupVersionKind(runtime.GroupVersionKind{
+	dpf.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "dpf.nvidia.com",
 		Version: "v1alpha1",
 		Kind:    "DpfDeployment",
@@ -149,14 +150,14 @@ func (r *NvidiaDPFAdapterReconciler) syncStatus(ctx context.Context, opiDPU *uns
 
 func (r *NvidiaDPFAdapterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	opiGVK := &unstructured.Unstructured{}
-	opiGVK.SetGroupVersionKind(runtime.GroupVersionKind{
+	opiGVK.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "opi.github.io",
 		Version: "v1alpha1",
 		Kind:    "Dpu",
 	})
 	
 	dpfGVK := &unstructured.Unstructured{}
-	dpfGVK.SetGroupVersionKind(runtime.GroupVersionKind{
+	dpfGVK.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "dpf.nvidia.com",
 		Version: "v1alpha1",
 		Kind:    "DpfDeployment",
