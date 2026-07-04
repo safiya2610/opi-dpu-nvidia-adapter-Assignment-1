@@ -177,6 +177,4 @@ This architecture was designed and iterated using Large Language Models (LLMs) i
 
 ---
 
-## License
 
-This project is licensed under the Apache License 2.0. See the LICENSE file for details.
