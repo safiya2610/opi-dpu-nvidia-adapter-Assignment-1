@@ -260,4 +260,4 @@ To extend for AMD support, add a new translator implementation such as `AMDTrans
 - Register the adapter in `VendorRegistry{"amd": &AMDTranslator{}}`.
 
 This preserves the adapter pattern while allowing multi-vendor reconciliation without recompiling the reconciler logic.
->>>>>>> fb8ec84 (feat(adapter): add vendor-neutral adapter skeleton and Nvidia translator)
+
