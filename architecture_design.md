@@ -197,7 +197,7 @@ To maintain a secure cluster configuration, the adapter reconciler operates unde
 
 To justify the Sub-Operator Composition model, several alternative design paradigms were evaluated:
 
-### Option 1: CRD Translation Layer (Sub-Operator Composition) — *Selected*
+### CRD Translation Layer (Sub-Operator Composition) 
 * **Description:** OPI Operator acts as an API proxy translating configurations into vendor-native CRDs.
 * **Score: 9/10**
 * **Pros:**
@@ -207,27 +207,6 @@ To justify the Sub-Operator Composition model, several alternative design paradi
 * **Cons:**
   * Double Kubernetes resource overhead (requires deployment of both operators).
   * Latency is slightly increased due to extra CRD lifecycle events.
-
-### Option 2: Native Go SDK Integration (Monolithic Operator) — *Rejected*
-* **Description:** Core OPI Operator imports vendor-specific SDKs and directly interacts with DPUs.
-* **Score: 4/10**
-* **Pros:**
-  * Low latency with direct API calls.
-  * Single operator deployment.
-* **Cons:**
-  * Monstrous binary size and severe dependency drift issues.
-  * Licensing conflicts (GPL vs. Proprietary SDK wrappers).
-  * Any vendor driver crash can take down the entire OPI Operator.
-
-<<<<<<< HEAD
-### Option 3: Webhook-based Translation Layer — *Rejected*
-* **Description:** A Mutating/Validating Webhook translates the resources dynamically on-the-fly.
-* **Score: 5/10**
-* **Pros:**
-  * Fast execution before writing to `etcd`.
-* **Cons:**
-  * Webhooks lack continuous reconciliation. If downstream hardware state changes or drifts, the webhook cannot self-heal because it is not triggered.
-  * Difficult to debug, troubleshoot, and test.
 
 ---
 
