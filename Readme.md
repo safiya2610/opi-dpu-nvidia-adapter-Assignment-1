@@ -177,3 +177,29 @@ This architecture was designed and iterated using Large Language Models (LLMs) i
 ---
 
 
+<<<<<<< HEAD
+=======
+## Expected Outputs (Machine-Readable Formats Only)
+Please submit the following files exactly as named:
+1. `architecture_design.md`
+   * A Markdown document containing the final architecture proposal, sequence diagrams (Mermaid.js format), and trade-off analysis.
+2. `llm_transcript.json`
+   * A JSON file containing the exact prompts you used and the LLM's responses. Must follow a structured array format: `[{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]`.
+3. `feature_skeleton.go` (Bonus)
+   * A compilable (but not necessarily fully functional) Go source code file containing the basic structures and interfaces for the integration.
+
+## Current Implementation Status
+- `feature_skeleton.go` implements a vendor-neutral adapter design with a `VendorAdapter` interface and a concrete `NvidiaTranslator`.
+- The reconciler uses a `VendorRegistry` to select the correct adapter based on `spec.vendor` in the OPI `Dpu` resource.
+- The current implementation translates OPI `Dpu` objects into NVIDIA `dpf.nvidia.com/v1alpha1/DpfDeployment` CRs and syncs status back into the OPI CR.
+- It does not directly import or use the NVIDIA DOCA SDK; rather, it delegates provisioning to the existing NVIDIA DPF operator via CRD translation.
+
+## Build and Verification
+From the repository root:
+
+```bash
+go test ./...
+```
+
+This project currently has no test files, but the module compiles successfully with the current skeleton.
+>>>>>>> fb8ec84 (feat(adapter): add vendor-neutral adapter skeleton and Nvidia translator)

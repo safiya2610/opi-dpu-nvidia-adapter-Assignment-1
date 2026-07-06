@@ -219,6 +219,7 @@ To justify the Sub-Operator Composition model, several alternative design paradi
   * Licensing conflicts (GPL vs. Proprietary SDK wrappers).
   * Any vendor driver crash can take down the entire OPI Operator.
 
+<<<<<<< HEAD
 ### Option 3: Webhook-based Translation Layer — *Rejected*
 * **Description:** A Mutating/Validating Webhook translates the resources dynamically on-the-fly.
 * **Score: 5/10**
@@ -236,3 +237,27 @@ To scale this architecture to support other vendors (such as Intel or Marvell) i
 1. **Dynamic Registration Interface:** Define a standard Go `VendorAdapter` interface inside the OPI Operator.
 2. **Modular Controller Loading:** Build the OPI Operator in a modular fashion where vendor-specific controllers register themselves during startup.
 3. **Plug-and-Play Deployments:** Allow users to enable or disable vendor controllers using Helm chart values, reducing the runtime footprint to only the hardware present in the cluster.
+=======
+## 5. Implementation Considerations
+- **Garbage Collection:** The OPI Operator must set `OwnerReferences` on the translated DPF CRDs. If a cluster administrator deletes the OPI DPU resource, Kubernetes will automatically cascade the deletion to the DPF CRD.
+- **Server-Side Apply (SSA):** The translation layer should use SSA to ensure clear declarative field ownership, avoiding race conditions where the translation layer and the DPF operator overwrite each other’s fields.
+
+## 6. Current Implementation Status
+The current Go skeleton implements the recommended architecture as a translation adapter:
+- Uses a generic `VendorAdapter` interface to isolate vendor-specific details.
+- Implements `NvidiaTranslator` for NVIDIA DPF CRD generation.
+- Uses a `VendorRegistry` to route reconciliation based on `spec.vendor` in the OPI `Dpu` resource.
+- Applies translated `DpfDeployment` CRs using Server-Side Apply and owner references.
+- Syncs the vendor CR status back into the OPI `Dpu` status field.
+
+### Notes on DOCA Usage
+This skeleton intentionally avoids importing the NVIDIA DOCA SDK directly. Instead, it translates generic OPI intent into native NVIDIA DPF CRs and relies on the NVIDIA DPF operator to perform the DOCA-based hardware provisioning. This keeps the core OPI operator vendor-agnostic and extensible for future AMD or alternative vendor adapters.
+
+### Future Extension Path
+To extend for AMD support, add a new translator implementation such as `AMDTranslator`:
+- Implement `Translate()` to create AMD-specific CRDs.
+- Implement `OwnedGVK()` to return the AMD CRD GVK.
+- Register the adapter in `VendorRegistry{"amd": &AMDTranslator{}}`.
+
+This preserves the adapter pattern while allowing multi-vendor reconciliation without recompiling the reconciler logic.
+>>>>>>> fb8ec84 (feat(adapter): add vendor-neutral adapter skeleton and Nvidia translator)

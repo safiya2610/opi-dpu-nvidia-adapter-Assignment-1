@@ -20,6 +20,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
+const (
+	opiGroup   = "opi.github.io"
+	opiVersion = "v1alpha1"
+	opiKind    = "Dpu"
+	fieldOwner = "opi-nvidia-adapter"
+)
+
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
@@ -29,88 +36,105 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 }
 
-// NvidiaDPFAdapterReconciler reconciles an OPI DPU object and translates it into an NVIDIA DPF object.
-// It leverages unstructured.Unstructured to avoid tightly coupling vendor-specific Go types into the OPI binary.
-type NvidiaDPFAdapterReconciler struct {
+// VendorAdapter defines the abstraction between the OPI reconciliation loop and
+// a vendor-specific translation layer.
+type VendorAdapter interface {
+	Translate(name, namespace string, opiSpec map[string]interface{}) (*unstructured.Unstructured, error)
+	OwnedGVK() schema.GroupVersionKind
+}
+
+type VendorRegistry map[string]VendorAdapter
+
+// NvidiaTranslator implements NVIDIA-specific translation logic from OPI DPU
+// resources into DPF custom resources.
+type NvidiaTranslator struct{}
+
+// VendorDPFAdapterReconciler reconciles OPI DPU resources by translating them
+// into vendor-specific DPF CRs and syncing status back into the OPI API.
+type VendorDPFAdapterReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Registry VendorRegistry
 }
 
 // RBAC permissions required for the translation operator
 // +kubebuilder:rbac:groups=opi.github.io,resources=dpus,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=opi.github.io,resources=dpus/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=dpf.nvidia.com,resources=dpfdeployments,verbs=get;list;watch;create;update;patch;delete
-
-func (r *NvidiaDPFAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *VendorDPFAdapterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// 1. Fetch the OPI DPU instance
 	var opiDPU unstructured.Unstructured
-	opiDPU.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "opi.github.io",
-		Version: "v1alpha1",
-		Kind:    "Dpu",
-	})
+	opiDPU.SetGroupVersionKind(schema.GroupVersionKind{Group: opiGroup, Version: opiVersion, Kind: opiKind})
 
 	if err := r.Get(ctx, req.NamespacedName, &opiDPU); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
-		logger.Error(err, "Failed to get OPI DPU resource")
+		logger.Error(err, "failed to get OPI DPU resource")
 		return ctrl.Result{}, err
 	}
 
-	// 2. Extract the generic Spec for Translation
-	spec, found, err := unstructured.NestedMap(opiDPU.Object, "spec")
-	if err != nil || !found {
-		logger.Info("OPI DPU spec not found or invalid format")
+	opiSpec, found, err := unstructured.NestedMap(opiDPU.Object, "spec")
+	if err != nil {
+		logger.Error(err, "failed to parse OPI DPU spec")
+		return ctrl.Result{}, err
+	}
+	if !found {
+		logger.Info("OPI DPU spec not found")
 		return ctrl.Result{}, nil
 	}
 
-	// 3. Translate OPI intent to NVIDIA DPF CRD
-	dpfCRD, err := r.translateToDPF(req.Name, req.Namespace, spec)
+	vendor, _, _ := unstructured.NestedString(opiSpec, "vendor")
+	adapter, ok := r.Registry[vendor]
+	if !ok {
+		logger.Info("Skipping unsupported vendor", "vendor", vendor)
+		return ctrl.Result{}, nil
+	}
+
+	dpfCRD, err := adapter.Translate(req.Name, req.Namespace, opiSpec)
 	if err != nil {
-		logger.Error(err, "Failed to translate OPI Spec to DPF Spec")
+		logger.Error(err, "failed to translate OPI spec to DPF spec")
 		return ctrl.Result{}, err
 	}
 
-	// Set OPI DPU as the owner and controller of the DPF CRD for garbage collection
 	if err := ctrl.SetControllerReference(&opiDPU, dpfCRD, r.Scheme); err != nil {
-		logger.Error(err, "Failed to set ControllerReference")
+		logger.Error(err, "failed to set controller reference")
 		return ctrl.Result{}, err
 	}
 
-	// 4. Server-Side Apply the translated DPF CRD
-	if err := r.Patch(ctx, dpfCRD, client.Apply, client.FieldOwner("opi-nvidia-adapter"), client.ForceOwnership); err != nil {
-		logger.Error(err, "Failed to apply DPF CRD via Server-Side Apply")
+	if err := r.Patch(ctx, dpfCRD, client.Apply, client.FieldOwner(fieldOwner), client.ForceOwnership); err != nil {
+		logger.Error(err, "failed to apply DPF CR")
 		return ctrl.Result{}, err
 	}
 
-	// 5. Sync Status from DPF to OPI CRD
-	if err := r.syncStatus(ctx, &opiDPU, dpfCRD.GetName(), req.Namespace); err != nil {
-		logger.Error(err, "Failed to sync status from DPF to OPI CRD")
+	if err := r.syncStatus(ctx, &opiDPU, dpfCRD.GetName(), req.Namespace, adapter.OwnedGVK()); err != nil {
+		logger.Error(err, "failed to sync status from DPF to OPI")
 		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
 }
 
-func (r *NvidiaDPFAdapterReconciler) translateToDPF(name, namespace string, opiSpec map[string]interface{}) (*unstructured.Unstructured, error) {
+func (t *NvidiaTranslator) Translate(name, namespace string, opiSpec map[string]interface{}) (*unstructured.Unstructured, error) {
 	dpf := &unstructured.Unstructured{}
-	dpf.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "dpf.nvidia.com",
-		Version: "v1alpha1",
-		Kind:    "DpfDeployment",
-	})
+	dpf.SetGroupVersionKind(schema.GroupVersionKind{Group: "dpf.nvidia.com", Version: "v1alpha1", Kind: "DpfDeployment"})
 	dpf.SetName(fmt.Sprintf("%s-dpf", name))
 	dpf.SetNamespace(namespace)
 
 	dpfSpec := make(map[string]interface{})
-	if image, ok := opiSpec["image"].(string); ok {
+
+	if image, ok := opiSpec["image"].(string); ok && image != "" {
 		dpfSpec["systemImage"] = image
 	}
-	if profile, ok := opiSpec["profile"].(string); ok {
+	if profile, ok := opiSpec["profile"].(string); ok && profile != "" {
 		dpfSpec["configurationProfile"] = profile
+	}
+	if resources, ok := opiSpec["resources"].(map[string]interface{}); ok {
+		dpfSpec["resources"] = resources
+	}
+	if network, ok := opiSpec["network"].(map[string]interface{}); ok {
+		dpfSpec["networkConfig"] = network
 	}
 
 	if err := unstructured.SetNestedMap(dpf.Object, dpfSpec, "spec"); err != nil {
@@ -120,18 +144,17 @@ func (r *NvidiaDPFAdapterReconciler) translateToDPF(name, namespace string, opiS
 	return dpf, nil
 }
 
-func (r *NvidiaDPFAdapterReconciler) syncStatus(ctx context.Context, opiDPU *unstructured.Unstructured, dpfName, namespace string) error {
-	dpf := &unstructured.Unstructured{}
-	dpf.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "dpf.nvidia.com",
-		Version: "v1alpha1",
-		Kind:    "DpfDeployment",
-	})
+func (t *NvidiaTranslator) OwnedGVK() schema.GroupVersionKind {
+	return schema.GroupVersionKind{Group: "dpf.nvidia.com", Version: "v1alpha1", Kind: "DpfDeployment"}
+}
 
-	err := r.Get(ctx, types.NamespacedName{Name: dpfName, Namespace: namespace}, dpf)
-	if err != nil {
+func (r *VendorDPFAdapterReconciler) syncStatus(ctx context.Context, opiDPU *unstructured.Unstructured, dpfName, namespace string, gvk schema.GroupVersionKind) error {
+	dpf := &unstructured.Unstructured{}
+	dpf.SetGroupVersionKind(gvk)
+
+	if err := r.Get(ctx, types.NamespacedName{Name: dpfName, Namespace: namespace}, dpf); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil 
+			return nil
 		}
 		return err
 	}
@@ -148,25 +171,18 @@ func (r *NvidiaDPFAdapterReconciler) syncStatus(ctx context.Context, opiDPU *uns
 	return r.Status().Update(ctx, opiDPU)
 }
 
-func (r *NvidiaDPFAdapterReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *VendorDPFAdapterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	opiGVK := &unstructured.Unstructured{}
-	opiGVK.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "opi.github.io",
-		Version: "v1alpha1",
-		Kind:    "Dpu",
-	})
-	
-	dpfGVK := &unstructured.Unstructured{}
-	dpfGVK.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "dpf.nvidia.com",
-		Version: "v1alpha1",
-		Kind:    "DpfDeployment",
-	})
+	opiGVK.SetGroupVersionKind(schema.GroupVersionKind{Group: opiGroup, Version: opiVersion, Kind: opiKind})
 
-	return ctrl.NewControllerManagedBy(mgr).
-		For(opiGVK).
-		Owns(dpfGVK).
-		Complete(r)
+	builder := ctrl.NewControllerManagedBy(mgr).For(opiGVK)
+	for _, adapter := range r.Registry {
+		dpfGVK := &unstructured.Unstructured{}
+		dpfGVK.SetGroupVersionKind(adapter.OwnedGVK())
+		builder = builder.Owns(dpfGVK)
+	}
+
+	return builder.Complete(r)
 }
 
 func main() {
@@ -177,11 +193,9 @@ func main() {
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
-			"Enabling this will ensure there is only one active controller manager.")
-	
-	opts := zap.Options{
-		Development: true,
-	}
+		"Enabling this will ensure there is only one active controller manager.")
+
+	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
@@ -198,11 +212,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&NvidiaDPFAdapterReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "NvidiaDPFAdapterReconciler")
+	registry := VendorRegistry{
+		"nvidia": &NvidiaTranslator{},
+	}
+
+	reconciler := &VendorDPFAdapterReconciler{
+		Client:  mgr.GetClient(),
+		Scheme:  mgr.GetScheme(),
+		Registry: registry,
+	}
+
+	if err = reconciler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "VendorDPFAdapterReconciler")
 		os.Exit(1)
 	}
 
@@ -221,3 +242,4 @@ func main() {
 		os.Exit(1)
 	}
 }
+
