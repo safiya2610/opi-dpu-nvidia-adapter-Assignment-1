@@ -177,7 +177,7 @@ This architecture was designed and iterated using Large Language Models (LLMs) i
 ---
 
 
-<<<<<<< HEAD
+
 =======
 ## Expected Outputs (Machine-Readable Formats Only)
 Please submit the following files exactly as named:
