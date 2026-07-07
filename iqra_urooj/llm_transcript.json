@@ -1,0 +1,10 @@
+[
+  {
+    "role": "user",
+    "content": "Hi, I am doing the OPI Internship Assignment 1. Please help me architect a solution to add NVIDIA support to the OPI DPU operator by integrating it with the NVIDIA DPF operator. Act as an expert Software Architect and suggest an integration pattern (like Adapter Pattern or CRD Translation Layer) that aligns with Kubernetes operator patterns. Give me the response in clear Markdown with a Mermaid.js sequence diagram."
+  },
+  {
+    "role": "assistant",
+    "content": "Here is the complete architectural design proposal for your assignment. I have selected the CRD Translation Layer (with an Adapter Pattern) as the ideal integration strategy..."
+  }
+]
